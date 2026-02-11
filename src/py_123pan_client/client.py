@@ -68,6 +68,7 @@ class PanClient:
         resp_json = {}
         network_retry_limit = 3
         for attempt in range(network_retry_limit):
+            response = None
             try:
                 response = self.client.request(method, url, headers=headers, **kwargs)
 
@@ -88,7 +89,9 @@ class PanClient:
                 time.sleep(1 * (attempt + 1))
             except Exception as e:
                 raise PanAPIError(0, f"Request Error: {str(e)}")
-
+            finally:
+                if response:
+                    response.close()
         code = resp_json.get("code")
         if code == 0: return resp_json.get("data")
 
