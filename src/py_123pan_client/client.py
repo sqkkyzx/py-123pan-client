@@ -382,7 +382,7 @@ class PanClient:
         if domains and isinstance(domains, list): return domains[0]
         return self.base_url
 
-    def upload_file(self, local_path: str, filename: str = None, parent_file_id: int = 0, conflict_strategy: int = 1) -> int:
+    def upload_file(self, local_path: str, filename: str = None, parent_file_id: int = 0, conflict_strategy: int = 1, callback_func = None) -> int:
         """
         上传文件
         :param filename: 文件名
@@ -390,6 +390,7 @@ class PanClient:
         :param parent_file_id: 目录id，默认为 0 即根目录
         :param conflict_strategy:
         :return: FileID
+        :param callback_func: 进度回调，会传入一个字典值。 {"finished_chunks": 0, "total_chunks": 0, "remaining_chunks": 0, "percent": 0, "avg_time_per_chunk": 0, "elapsed_seconds": 0, "eta_seconds": 0}
         """
         filename = filename.replace('\\', '/')
         while filename.startswith('//'):
@@ -412,7 +413,7 @@ class PanClient:
                 return self._upload_single(local_path, filename or local_filename, file_md5, local_file_size, parent_file_id, conflict_strategy)
             except PanAPIError:
                 pass
-        return self._upload_chunked(local_path, filename or local_filename, file_md5, local_file_size, parent_file_id, conflict_strategy)
+        return self._upload_chunked(local_path, filename or local_filename, file_md5, local_file_size, parent_file_id, conflict_strategy, callback_func)
 
     def _upload_single(self, filepath, filename, etag, size, parent_id, duplicate) -> int:
         with open(filepath, "rb") as f:
@@ -430,7 +431,7 @@ class PanClient:
                 files={"file": (filename, f, "application/octet-stream")}
             ).get("fileID")
 
-    def _upload_chunked(self, filepath, filename, etag, size, parent_id, duplicate) -> int:
+    def _upload_chunked(self, filepath, filename, etag, size, parent_id, duplicate, callback_func = None) -> int:
         init_data = self._request(
             "POST", API_PATH_CHUNK_CREATE,
             json={
@@ -446,18 +447,54 @@ class PanClient:
             return init_data.get("fileID")
 
         pre_id, slice_size, upload_host = init_data["preuploadID"], init_data["sliceSize"], init_data["servers"][0].rstrip("/")
+
+        total_chunks = math.ceil(size / slice_size)
+
+        upload_timeout = httpx.Timeout(600.0, connect=60.0, write=None)
+
+        start_time = time.time()
+
         with open(filepath, "rb") as f:
             slice_no = 1
-            total_chunks = math.ceil(size / slice_size)
             while True:
                 chunk = f.read(slice_size)
                 if not chunk: break
 
-                percent = (slice_no / total_chunks) * 100
-                logger.info(f"[{filename}] 上传进度: 分片 {slice_no}/{total_chunks} ({percent:.1f}%)")
+                percent = (slice_no-1 / total_chunks) * 100
+                # 当前已消耗时间
+                elapsed_seconds = time.time() - start_time
+                elapsed_str = str(timedelta(seconds=int(elapsed_seconds)))
+
+                # 计算 ETA (从第2个分片开始算，避免除以0或波动太大)
+                eta_str = "计算中..."
+
+                if slice_no > 1:
+                    # 平均每个分片耗时
+                    avg_time_per_chunk = elapsed_seconds / (slice_no - 1)
+                    remaining_chunks = total_chunks - (slice_no - 1)
+                    eta_seconds = int(avg_time_per_chunk * remaining_chunks)
+                    eta_str = str(timedelta(seconds=eta_seconds))
+                    callback_data = {
+                        "finished_chunks": slice_no - 1,
+                        "total_chunks": total_chunks,
+                        "remaining_chunks": remaining_chunks,
+                        "percent": percent,
+                        "avg_time_per_chunk": avg_time_per_chunk,
+                        "elapsed_seconds": elapsed_seconds,
+                        "eta_seconds": eta_seconds
+                    }
+                    callback_func(callback_data)
+
+
+                logger.info(
+                    f"[{filename}] 进度: {slice_no}/{total_chunks} ({percent:.1f}%) | "
+                    f"已用时: {elapsed_str} | 预估剩余用时: {eta_str}"
+                )
+
+
 
                 slice_success = False
-                upload_timeout = httpx.Timeout(600.0, connect=60.0, write=None)
+
                 for s_retry in range(2):
                     try:
                         self._request("POST", f"{upload_host}{API_PATH_CHUNK_SLICE}",
