@@ -1,4 +1,5 @@
 import logging
+import math
 import time
 import os
 from datetime import datetime, timedelta
@@ -447,14 +448,17 @@ class PanClient:
         pre_id, slice_size, upload_host = init_data["preuploadID"], init_data["sliceSize"], init_data["servers"][0].rstrip("/")
         with open(filepath, "rb") as f:
             slice_no = 1
+            total_chunks = math.ceil(size / slice_size)
             while True:
                 chunk = f.read(slice_size)
                 if not chunk: break
 
-                # 【优化】为单个分片增加重试，防止因单次 Timeout 导致全局失败
+                percent = (slice_no / total_chunks) * 100
+                logger.info(f"[{filename}] 上传进度: 分片 {slice_no}/{total_chunks} ({percent:.1f}%)")
+
                 slice_success = False
                 upload_timeout = httpx.Timeout(600.0, connect=60.0, write=None)
-                for s_retry in range(5):
+                for s_retry in range(2):
                     try:
                         self._request("POST", f"{upload_host}{API_PATH_CHUNK_SLICE}",
                                       data={"preuploadID": pre_id, "sliceNo": slice_no,
