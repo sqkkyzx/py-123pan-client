@@ -25,12 +25,14 @@ class PanClient:
             client_id: str,
             client_secret: str,
             access_token: Optional[str] = None,
-            base_url: str = API_BASE_URL
+            base_url: str = API_BASE_URL,
+            upload_bandwidth_mbps: int = 20
     ):
         self.client_id = client_id
         self.client_secret = client_secret
         self._access_token = access_token
         self._token_expires_at: Optional[datetime] = None
+        self._upload_bandwidth_mbps = upload_bandwidth_mbps
         self.base_url = base_url.rstrip("/")
         self.client = httpx.Client(
             timeout=httpx.Timeout(60.0, connect=10.0, read=120.0, write=None)
@@ -448,9 +450,10 @@ class PanClient:
 
         pre_id, slice_size, upload_host = init_data["preuploadID"], init_data["sliceSize"], init_data["servers"][0].rstrip("/")
 
-        total_chunks = math.ceil(size / slice_size)
+        calculated_write_timeout = max(60.0, (slice_size / (self._upload_bandwidth_mbps * 1024 * 1024 / 8)) * 1.2)
+        upload_timeout = httpx.Timeout(120.0, connect=60.0, write=calculated_write_timeout)
 
-        upload_timeout = httpx.Timeout(120.0, connect=60.0, write=None)
+        total_chunks = math.ceil(size / slice_size)
 
         start_time = time.time()
 
@@ -460,7 +463,7 @@ class PanClient:
                 chunk = f.read(slice_size)
                 if not chunk: break
 
-                percent = (slice_no-1 / total_chunks) * 100
+                percent = ((slice_no - 1) / total_chunks) * 100
                 # 当前已消耗时间
                 elapsed_seconds = time.time() - start_time
                 elapsed_str = str(timedelta(seconds=int(elapsed_seconds)))

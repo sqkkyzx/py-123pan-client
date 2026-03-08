@@ -1,7 +1,7 @@
 from typing import TYPE_CHECKING
 
 from pydantic import Field
-
+from .consts import *
 from .client import PanClient
 
 _DAGSTER_AVAILABLE = False
@@ -29,8 +29,16 @@ class Dagster123PanResource(ConfigurableResource):
         pip install "py-123pan-client[dagster]"
     """
 
-    client_id: str = Field(description="Client ID")
-    client_secret: str = Field(description="Client Secret")
+    client_id: str = Field(description="123云盘 API Client ID")
+    client_secret: str = Field(description="123云盘 API Client Secret")
+    base_url: str = Field(
+        default=API_BASE_URL,
+        description="API 基础地址，默认为官方开放平台地址"
+    )
+    upload_bandwidth_mbps: int = Field(
+        default=20,
+        description="保底上行带宽 (Mbps)，用于动态计算分片上传超时时间"
+    )
 
     def __init__(self, **kwargs):
         if not _DAGSTER_AVAILABLE:
@@ -48,5 +56,7 @@ class Dagster123PanResource(ConfigurableResource):
         """
         return PanClient(
             client_id=self.client_id,
-            client_secret=self.client_secret
+            client_secret=self.client_secret,
+            base_url=self.base_url,
+            upload_bandwidth_mbps=self.upload_bandwidth_mbps
         )
