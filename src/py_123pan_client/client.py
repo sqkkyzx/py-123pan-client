@@ -450,7 +450,7 @@ class PanClient:
 
         total_chunks = math.ceil(size / slice_size)
 
-        upload_timeout = httpx.Timeout(600.0, connect=60.0, write=None)
+        upload_timeout = httpx.Timeout(120.0, connect=60.0, write=None)
 
         start_time = time.time()
 
